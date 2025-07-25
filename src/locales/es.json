@@ -1,0 +1,23 @@
+{
+    "auth": {
+        "provisionalCredentialsError": "Credenciales provisionales inválidas. Por favor, contacta al administrador.",
+        "invalidCredentialsError": "Correo electrónico o contraseña inválidos.",
+        "setCredentialsSuccess": "Credenciales actualizadas correctamente. Por favor, inicia sesión de nuevo.",
+        "setCredentialsError": "Error al establecer las nuevas credenciales. Por favor, inténtalo de nuevo.",
+        "userNotFoundError": "No se encontró un usuario con este correo electrónico.",
+        "forgotPasswordSuccess": "Se ha enviado una nueva contraseña a tu correo electrónico.",
+        "forgotPasswordError": "Error al enviar el correo de recuperación. Por favor, inténtalo más tarde.",
+        "emailSubject": "Tu nueva contraseña para FAMLocator",
+        "emailTextBody": "¡Hola! Tu nueva contraseña es: {{newPassword}}",
+        "emailHtmlBody": "<p>¡Hola!</p><p>Tu nueva contraseña es: <strong>{{newPassword}}</strong></p>",
+        "unexpectedError": "Ocurrió un error inesperado. Por favor, inténtalo de nuevo.",
+        "verificationSubject": "Tu código de verificación para FAMLocator",
+        "verificationTextBody": "Tu código de verificación es: {{token}}",
+        "verificationHtmlBody": "<p>Tu código de verificación es: <strong>{{token}}</strong></p>",
+        "verificationSent": "Se ha enviado un token de verificación a tu correo. Por favor, introdúcelo para activar tu cuenta.",
+        "needsVerificationError": "Esta cuenta necesita ser verificada. Por favor, introduce el token que enviamos a tu correo.",
+        "needsAdminApprovalError": "Tu correo ha sido verificado. La cuenta está pendiente de aprobación por el administrador.",
+        "accountSuspendedError": "Tu cuenta ha sido suspendida. Contacta al administrador.",
+        "accountInactiveError": "Tu cuenta no está activa. Por favor, contacta al administrador."
+    }
+}

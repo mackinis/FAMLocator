@@ -1,0 +1,14 @@
+{
+    "auth": {
+        "provisionalCredentialsError": "Invalid provisional credentials. Please contact the administrator.",
+        "invalidCredentialsError": "Invalid email or password.",
+        "setCredentialsSuccess": "Credentials updated successfully. Please log in again.",
+        "setCredentialsError": "Error setting new credentials. Please try again.",
+        "userNotFoundError": "User not found with this email.",
+        "forgotPasswordSuccess": "A new password has been sent to your email.",
+        "forgotPasswordError": "Error sending recovery email. Please try again later.",
+        "emailSubject": "Your new password for FAMLocator",
+        "emailTextBody": "Hello! Your new password is: {{newPassword}}",
+        "emailHtmlBody": "<p>Hello!</p><p>Your new password is: <strong>{{newPassword}}</strong></p>"
+    }
+}
