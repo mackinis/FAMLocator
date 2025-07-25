@@ -5,18 +5,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Upload, Link } from "lucide-react";
+import { Upload, Link, Mail } from "lucide-react";
 import type { SiteSettings } from "@/lib/types";
 import { Separator } from "./ui/separator";
+import { Textarea } from "./ui/textarea";
 
 type SiteSettingsProps = {
     settings: SiteSettings;
-    onSettingChange: (changedSettings: Partial<SiteSettings> | { colors: SiteSettings['colors'] }) => void;
+    onSettingChange: (changedSettings: Partial<SiteSettings> | { colors: SiteSettings['colors'] } | { emailTemplates: SiteSettings['emailTemplates'] }) => void;
 }
 
 export function SiteSettings({ settings, onSettingChange }: SiteSettingsProps) {
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
         const { id, value } = e.target;
         onSettingChange({ [id]: value });
     }
@@ -28,6 +29,20 @@ export function SiteSettings({ settings, onSettingChange }: SiteSettingsProps) {
             colors: {
                 ...settings.colors,
                 [colorType]: value
+            }
+        });
+    }
+
+    const handleEmailTemplateChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { id, value } = e.target;
+        const [template, field] = id.split('.');
+        onSettingChange({
+            emailTemplates: {
+                ...settings.emailTemplates,
+                [template]: {
+                    ...settings.emailTemplates?.[template as keyof SiteSettings['emailTemplates']],
+                    [field]: value
+                }
             }
         });
     }
@@ -100,6 +115,24 @@ export function SiteSettings({ settings, onSettingChange }: SiteSettingsProps) {
                     </div>
                 </div>
                  
+                <Separator />
+
+                 <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                         <Mail className="h-5 w-5" />
+                         <Label>Plantillas de Email</Label>
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="verification.subject" className="text-sm text-muted-foreground">Asunto del Email de Verificación</Label>
+                        <Input id="verification.subject" value={settings.emailTemplates?.verification?.subject} onChange={handleEmailTemplateChange} />
+                    </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="verification.body" className="text-sm text-muted-foreground">Cuerpo del Email de Verificación</Label>
+                        <Textarea id="verification.body" value={settings.emailTemplates?.verification?.body} onChange={handleEmailTemplateChange} rows={5}/>
+                        <p className="text-xs text-muted-foreground">Usa {'{{token}}'} para insertar el token de verificación.</p>
+                    </div>
+                </div>
+
                 <Separator />
                  
                 <div className="space-y-4">

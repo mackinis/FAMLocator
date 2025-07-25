@@ -3,7 +3,7 @@
 import 'dotenv/config';
 
 import { getDb } from './firebase';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, query, where, limit, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch, query, where, limit, addDoc, serverTimestamp, or, Timestamp, deleteDoc } from 'firebase/firestore';
 import nodemailer from 'nodemailer';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -86,6 +86,14 @@ export async function loginUser({email, password}: {email: string; password: str
 }
 
 async function sendVerificationEmail(email: string, token: string, lang: Language) {
+    const settings = await getSiteSettings();
+    
+    const subjectTemplate = settings.emailTemplates?.verification?.subject || getMessage(lang, 'auth.verificationSubject');
+    const bodyTemplate = settings.emailTemplates?.verification?.body || getMessage(lang, 'auth.verificationHtmlBody');
+
+    const subject = subjectTemplate.replace('{{token}}', token);
+    const body = bodyTemplate.replace('{{token}}', token);
+
     const transporter = nodemailer.createTransport({
         host: process.env.EMAIL_HOST,
         port: parseInt(process.env.EMAIL_PORT || "587"),
@@ -100,14 +108,17 @@ async function sendVerificationEmail(email: string, token: string, lang: Languag
         await transporter.sendMail({
             from: `FAMLocator <${process.env.EMAIL_FROM}>`,
             to: email,
-            subject: getMessage(lang, 'auth.verificationSubject'),
-            text: getMessage(lang, 'auth.verificationTextBody', 'Tu código de verificación es: {{token}}').replace('{{token}}', token),
-            html: getMessage(lang, 'auth.verificationHtmlBody', '<p>Tu código de verificación es: <strong>{{token}}</strong></p>').replace('{{token}}', token),
+            subject: subject,
+            html: body,
         });
     } catch(error) {
          console.error("Error sending email:", error);
          throw new Error("Error de conexión con el servidor de correo. Por favor, inténtelo de nuevo más tarde.");
     }
+}
+
+function generateSecureToken() {
+    return randomBytes(18).toString('base64url').substring(0, 24);
 }
 
 
@@ -127,7 +138,7 @@ export async function registerUser(data: Record<string, FormDataEntryValue>, lan
       const userDoc = existingUserSnapshot.docs[0];
       const userData = userDoc.data();
       if(userData.status === 'pending' && userData.verificationToken){
-        const newVerificationToken = randomBytes(12).toString('hex');
+        const newVerificationToken = generateSecureToken();
         const newTokenExpiry = new Date(Date.now() + 3600000);
         await updateDoc(userDoc.ref, { verificationToken: newVerificationToken, tokenExpiry: newTokenExpiry });
         await sendVerificationEmail(email, newVerificationToken, lang);
@@ -136,7 +147,7 @@ export async function registerUser(data: Record<string, FormDataEntryValue>, lan
       return { success: false, message: "Ya existe un usuario con este correo electrónico." };
     }
 
-    const verificationToken = randomBytes(12).toString('hex');
+    const verificationToken = generateSecureToken();
     const tokenExpiry = new Date(Date.now() + 3600000);
 
     const salt = await bcrypt.genSalt(10);
@@ -175,7 +186,7 @@ export async function setupAdminAccount(data: Record<string, FormDataEntryValue>
     try {
         const adminUserRef = doc(db, 'users', 'admin_user');
         
-        const verificationToken = randomBytes(12).toString('hex');
+        const verificationToken = generateSecureToken();
         const tokenExpiry = new Date(Date.now() + 3600000);
         
         const salt = await bcrypt.genSalt(10);
@@ -251,6 +262,26 @@ export async function verifyTokenAndActivateUser({ token }: { token: string }, l
             isChatEnabled: true,
             isAdmin: true,
         });
+
+        const generalChatRef = doc(db, 'chats', 'general');
+        const generalChatDoc = await getDoc(generalChatRef);
+
+        if (!generalChatDoc.exists()) {
+          batch.set(generalChatRef, {
+              name: 'General',
+              memberIds: [userDoc.id],
+              isGroup: true,
+              createdAt: serverTimestamp()
+          });
+        } else {
+            const memberIds = generalChatDoc.data().memberIds || [];
+            if (!memberIds.includes(userDoc.id)) {
+                 batch.update(generalChatRef, {
+                    memberIds: [...memberIds, userDoc.id]
+                });
+            }
+        }
+
         await batch.commit();
         return { success: true, message: "Cuenta de administrador verificada. Ya puedes iniciar sesión." };
     } else {
@@ -307,6 +338,18 @@ export async function authorizeUser(userId: string): Promise<{success: boolean, 
             isChatEnabled: true,
             isAdmin: false,
         });
+
+        // Add user to general chat
+        const generalChatRef = doc(db, 'chats', 'general');
+        const generalChatDoc = await getDoc(generalChatRef);
+        if (generalChatDoc.exists()) {
+            const memberIds = generalChatDoc.data().memberIds || [];
+            if (!memberIds.includes(userId)) {
+                batch.update(generalChatRef, {
+                    memberIds: [...memberIds, userId]
+                });
+            }
+        }
         
         await batch.commit();
         return { success: true };
@@ -338,7 +381,7 @@ export async function resendVerificationToken({ email }: { email: string }, lang
         return { success: false, message: "Este correo ya fue verificado. La cuenta está esperando la aprobación del administrador."}
     }
     
-    const verificationToken = randomBytes(12).toString('hex');
+    const verificationToken = generateSecureToken();
     const tokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
 
     await updateDoc(userRef, {
@@ -373,8 +416,10 @@ export async function getFamilyMembers(): Promise<FamilyMember[]> {
             const familyMemberData = familyMembersMap.get(userId);
 
             if (familyMemberData) {
-                return { ...familyMemberData, status: userData.status };
+                // Combine data, giving precedence to familyMemberData, but ensuring status is from userDoc
+                return { ...familyMemberData, status: userData.status, email: userData.email, name: userData.name };
             } else {
+                // This is a user without a familyMember profile (likely pending)
                 return {
                     id: userId,
                     name: userData.name || 'Usuario Pendiente',
@@ -432,6 +477,12 @@ export async function getSiteSettings(): Promise<SiteSettings> {
         developerName: "RchBytec Srl",
         developerUrl: "https://rchbytec.com.ar",
         isChatEnabled: true,
+        emailTemplates: {
+            verification: {
+                subject: 'Tu código de verificación para FAMLocator',
+                body: '<p>Tu código de verificación es: <strong>{{token}}</strong></p>'
+            }
+        }
     };
 
     try {
@@ -439,8 +490,25 @@ export async function getSiteSettings(): Promise<SiteSettings> {
         const docSnap = await getDoc(settingsRef);
 
         if (docSnap.exists()) {
-            const fetchedSettings = docSnap.data();
-            return { ...defaultSettings, ...fetchedSettings, colors: {...defaultSettings.colors, ...fetchedSettings.colors} };
+            const fetchedSettings = docSnap.data() as SiteSettings;
+            // Deep merge for nested objects
+            const settings = {
+                ...defaultSettings,
+                ...fetchedSettings,
+                colors: {
+                    ...defaultSettings.colors,
+                    ...fetchedSettings.colors
+                },
+                emailTemplates: {
+                    ...defaultSettings.emailTemplates,
+                    ...fetchedSettings.emailTemplates,
+                    verification: {
+                        ...defaultSettings.emailTemplates.verification,
+                        ...fetchedSettings.emailTemplates?.verification
+                    }
+                }
+            };
+            return settings;
         } else {
             await setDoc(settingsRef, defaultSettings);
             return defaultSettings;
@@ -522,34 +590,33 @@ export async function updateMyLocation(userId: string, lat: number, lng: number,
 
 
 export async function clearChatHistory(): Promise<{success: boolean, message?: string}> {
+    const db = getDb();
     try {
-        const db = getDb();
-        const messagesRef = collection(db, 'messages');
-        const snapshot = await getDocs(messagesRef);
-        
-        if (snapshot.empty) {
-            return { success: true };
-        }
-
+        const chatsSnapshot = await getDocs(collection(db, "chats"));
         const batch = writeBatch(db);
-        snapshot.docs.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
 
+        for (const chatDoc of chatsSnapshot.docs) {
+            const messagesSnapshot = await getDocs(collection(db, 'chats', chatDoc.id, 'messages'));
+            messagesSnapshot.forEach(messageDoc => {
+                batch.delete(messageDoc.ref);
+            });
+        }
+        
+        await batch.commit();
         return { success: true };
     } catch (error) {
-        console.error("Error clearing chat history:", error);
-        return { success: false, message: "No se pudo vaciar el historial del chat." };
+        console.error("Error clearing ALL chat history:", error);
+        return { success: false, message: "No se pudo vaciar el historial de todos los chats." };
     }
 }
 
-export async function sendMessage(memberId: string, memberName: string, memberAvatar: string, text: string) {
+export async function sendMessage(chatId: string, memberId: string, memberName: string, memberAvatar: string, text: string) {
     const db = getDb();
-    if (!text.trim()) return;
+    if (!text.trim() || !chatId) return;
 
     try {
-        await addDoc(collection(db, "messages"), {
+        const messagesColRef = collection(db, 'chats', chatId, 'messages');
+        await addDoc(messagesColRef, {
             memberId,
             memberName,
             memberAvatar,
@@ -559,5 +626,128 @@ export async function sendMessage(memberId: string, memberName: string, memberAv
     } catch (error) {
         console.error("Error sending message: ", error);
         throw new Error("Could not send message.");
+    }
+}
+
+export async function getOrCreateChat(currentUserId: string, otherUserId: string): Promise<string> {
+    const db = getDb();
+    const memberIds = [currentUserId, otherUserId].sort(); // Sort to ensure consistent chat ID
+
+    // Check if a chat between these two users already exists
+    const q = query(
+        collection(db, 'chats'),
+        where('isGroup', '==', false),
+        where('memberIds', '==', memberIds)
+    );
+
+    const chatSnapshot = await getDocs(q);
+
+    if (!chatSnapshot.empty) {
+        return chatSnapshot.docs[0].id;
+    } else {
+        // Create a new chat
+        const otherUserDoc = await getDoc(doc(db, 'familyMembers', otherUserId));
+        if (!otherUserDoc.exists()) {
+            throw new Error('Other user does not exist.');
+        }
+
+        const newChat = {
+            name: otherUserDoc.data().name,
+            memberIds,
+            isGroup: false,
+            createdAt: serverTimestamp()
+        };
+        const chatDocRef = await addDoc(collection(db, 'chats'), newChat);
+        return chatDocRef.id;
+    }
+}
+
+export async function getChatsForUser(userId: string) {
+    const db = getDb();
+    const chatsRef = collection(db, 'chats');
+    const q = query(chatsRef, where('memberIds', 'array-contains', userId));
+    
+    const querySnapshot = await getDocs(q);
+    const chats: any[] = [];
+    querySnapshot.forEach(doc => {
+        const data = doc.data();
+        // Convert Firestore Timestamps to serializable format (ISO string)
+        if (data.createdAt && data.createdAt instanceof Timestamp) {
+            data.createdAt = data.createdAt.toDate().toISOString();
+        }
+        chats.push({ id: doc.id, ...data });
+    });
+
+    // Ensure "General" chat is always first
+    chats.sort((a, b) => {
+        if (a.id === 'general') return -1;
+        if (b.id === 'general') return 1;
+        if (a.isGroup && !b.isGroup) return -1;
+        if (!a.isGroup && b.isGroup) return 1;
+        return 0; // or sort by name/date
+    });
+
+    return chats;
+}
+
+export async function deletePrivateChat(chatId: string, userId: string): Promise<{ success: boolean; message?: string }> {
+    const db = getDb();
+    try {
+        const chatRef = doc(db, 'chats', chatId);
+        const chatDoc = await getDoc(chatRef);
+
+        if (!chatDoc.exists()) {
+            return { success: false, message: "La conversación no existe." };
+        }
+
+        const chatData = chatDoc.data();
+        if (chatData.isGroup) {
+            return { success: false, message: "No se puede eliminar el chat general." };
+        }
+
+        if (!chatData.memberIds.includes(userId)) {
+            return { success: false, message: "No tienes permiso para eliminar este chat." };
+        }
+        
+        // Delete all messages in the subcollection first
+        const messagesRef = collection(db, 'chats', chatId, 'messages');
+        const messagesSnapshot = await getDocs(messagesRef);
+        const batch = writeBatch(db);
+        messagesSnapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        // Then delete the chat document itself
+        batch.delete(chatRef);
+
+        await batch.commit();
+        
+        return { success: true };
+    } catch (error) {
+        console.error("Error deleting private chat:", error);
+        return { success: false, message: "Ocurrió un error al eliminar la conversación." };
+    }
+}
+
+export async function clearPrivateChatHistory(chatId: string): Promise<{ success: boolean; message?: string }> {
+    const db = getDb();
+    try {
+        const messagesRef = collection(db, 'chats', chatId, 'messages');
+        const messagesSnapshot = await getDocs(messagesRef);
+
+        if (messagesSnapshot.empty) {
+            return { success: true }; // Nothing to clear
+        }
+        
+        const batch = writeBatch(db);
+        messagesSnapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        
+        return { success: true };
+    } catch (error) {
+        console.error("Error clearing private chat history:", error);
+        return { success: false, message: "Ocurrió un error al vaciar el historial." };
     }
 }

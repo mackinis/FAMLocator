@@ -2,21 +2,23 @@
 
 import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { MapPin, LogOut, Settings, MessageSquare, Menu, Loader2 } from 'lucide-react';
+import { MapPin, LogOut, Settings, MessageSquare, Menu, Loader2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FamilyList } from './family-list';
 import { FamilyChat } from './family-chat';
-import type { FamilyMember, SiteSettings } from '@/lib/types';
+import type { FamilyMember, SiteSettings, Chat } from '@/lib/types';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Skeleton } from './ui/skeleton';
 import { AdminPanel } from './admin-panel';
-import { getFamilyMembers, getSiteSettings, updateMyLocation } from '@/lib/actions';
+import { getFamilyMembers, getSiteSettings, updateMyLocation, getOrCreateChat, getChatsForUser } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { ProfileDialog } from './profile-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } from './ui/sidebar';
-import { motion, useDragControls } from "framer-motion";
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
+
 
 const MapView = dynamic(() => import('./map-view'), {
   ssr: false,
@@ -53,8 +55,6 @@ function FamLocatorWrapper() {
        setIsLoading(false); // Stop loading
        router.push('/login');
     }
-    // By not including userData in the dependency array, we prevent this from re-running
-    // after we've successfully set the user and cleared the URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, searchParams]);
 
@@ -86,12 +86,18 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [chatPosition, setChatPosition] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const initialChatPos = useRef({ x: 0, y: 0 });
+
+
   const { toast } = useToast();
-  const dragConstraintRef = useRef<HTMLDivElement>(null);
-  const dragControls = useDragControls();
   const sidebarContext = useSidebar();
-  const isSidebarOpen = sidebarContext.state === 'expanded';
+  const isSidebarOpen = sidebarContext?.state === 'expanded';
+  const isMobile = useIsMobile();
 
   const currentUser = useMemo(() => {
     return familyMembers.find(m => m.id === loggedInUserId) || null;
@@ -105,16 +111,23 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
       }
       setIsLoading(true);
       try {
-        const [siteSettings, members] = await Promise.all([
+        const [siteSettings, members, userChats] = await Promise.all([
           getSiteSettings(),
           getFamilyMembers(),
+          getChatsForUser(loggedInUserId)
         ]);
         
         setSettings(siteSettings);
         setFamilyMembers(members);
+        setChats(userChats);
         
         const foundCurrentUser = members.find(m => m.id === loggedInUserId);
         setSelectedMember(foundCurrentUser || members[0] || null);
+
+        if (userChats.length > 0) {
+          const generalChat = userChats.find(c => c.isGroup) || userChats[0];
+          setActiveChat(generalChat);
+        }
 
       } catch (error) {
         console.error("Error fetching initial data:", error);
@@ -130,13 +143,10 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
     
     fetchInitialData();
     
-    // This interval is crucial for seeing other members' location updates.
     const interval = setInterval(async () => {
         if (!loggedInUserId) return;
         try {
             const members = await getFamilyMembers();
-            
-            // Preserve the currently selected member if they still exist in the new list
             setFamilyMembers(currentMembers => {
                 const updatedMembers = members;
                 if (selectedMember) {
@@ -167,11 +177,9 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
         return;
     }
 
-    // This just updates the DB. It does NOT trigger a full state re-render.
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        // Update DB in the background
         updateMyLocation(currentUser.id, latitude, longitude, 'Ubicación actual').catch(e => console.log("Failed to update location in DB", e));
       },
       (error) => {
@@ -205,6 +213,31 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
   const handleSelectMember = (member: FamilyMember) => {
     setSelectedMember(member);
   };
+
+  const handleStartChat = async (otherMember: FamilyMember) => {
+    if (!currentUser || currentUser.id === otherMember.id) return;
+    try {
+      const chatId = await getOrCreateChat(currentUser.id, otherMember.id);
+      const existingChat = chats.find(c => c.id === chatId);
+      if (existingChat) {
+        setActiveChat(existingChat);
+      } else {
+        const newChats = await getChatsForUser(currentUser.id);
+        setChats(newChats);
+        const newActiveChat = newChats.find(c => c.id === chatId);
+        setActiveChat(newActiveChat || null);
+      }
+      setIsChatOpen(true);
+
+    } catch (error) {
+      console.error("Error starting chat:", error);
+      toast({
+        variant: 'destructive',
+        title: 'Error de Chat',
+        description: 'No se pudo iniciar la conversación.'
+      });
+    }
+  };
   
   const handleProfileUpdate = (updatedUser: FamilyMember) => {
     setFamilyMembers(prevMembers => prevMembers.map(m => m.id === updatedUser.id ? updatedUser : m));
@@ -216,6 +249,32 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
   const handleSettingsUpdate = (updatedSettings: SiteSettings) => {
     setSettings(updatedSettings);
   }
+
+  const onDragStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Only allow left-click drags
+    isDragging.current = true;
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    initialChatPos.current = { x: chatPosition.x, y: chatPosition.y };
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragEnd);
+  };
+
+  const onDragMove = (e: MouseEvent) => {
+    if (!isDragging.current) return;
+    const dx = e.clientX - dragStartPos.current.x;
+    const dy = e.clientY - dragStartPos.current.y;
+    setChatPosition({
+      x: initialChatPos.current.x + dx,
+      y: initialChatPos.current.y + dy,
+    });
+  };
+
+  const onDragEnd = () => {
+    isDragging.current = false;
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragEnd);
+  };
+
 
   if (isLoading) {
     return (
@@ -235,8 +294,21 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
     )
   }
 
+  const ChatComponent = (
+    <FamilyChat
+      currentUser={currentUser}
+      chats={chats}
+      activeChat={activeChat}
+      onActiveChatChange={setActiveChat}
+      onClose={() => setIsChatOpen(false)}
+      familyMembers={familyMembers}
+      onDragStart={onDragStart}
+      onChatsUpdate={setChats}
+    />
+  );
+
   return (
-      <div ref={dragConstraintRef} className="h-screen w-full bg-background text-foreground font-body overflow-hidden">
+      <div className="h-screen w-full bg-background text-foreground font-body overflow-hidden">
         <header className="fixed top-0 left-0 right-0 h-16 flex items-center justify-between border-b bg-card px-4 md:px-6 z-30">
           <div className="flex items-center gap-3">
             <SidebarTrigger className="md:hidden" />
@@ -245,7 +317,7 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
           </div>
           <div className="flex items-center gap-1 md:gap-2">
             {settings?.isChatEnabled && (
-                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(prev => !prev)} disabled={!currentUser}>
+                 <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(prev => !prev)} disabled={!currentUser}>
                     <MessageSquare className="h-5 w-5" />
                 </Button>
             )}
@@ -272,7 +344,7 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
         
         <main className="h-full flex flex-row pt-16">
             <Sidebar collapsible="icon">
-              <FamilyList onSelectMember={handleSelectMember} selectedMember={selectedMember} familyMembers={visibleFamilyMembers} />
+              <FamilyList onSelectMember={handleSelectMember} selectedMember={selectedMember} familyMembers={visibleFamilyMembers.filter(m => m.id !== currentUser.id)} onStartChat={handleStartChat} />
             </Sidebar>
             <div className="flex-1 flex flex-col relative h-full">
               <div className="flex-1 w-full relative">
@@ -286,21 +358,31 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
               </footer>
             </div>
         </main>
-
-        {settings?.isChatEnabled && currentUser && isChatOpen && (
-          <div className="absolute top-20 right-10 z-50 pointer-events-none" style={{ width: '400px', height: '600px' }}>
-            <motion.div
-                drag
-                dragConstraints={dragConstraintRef}
-                dragControls={dragControls}
-                dragMomentum={false}
-                className="h-full w-full pointer-events-auto"
-                whileDrag={{ scale: 1.02, shadow: '0 0 20px rgba(0,0,0,0.2)' }}
-            >
-                <FamilyChat currentUser={currentUser} dragControls={dragControls} onClose={() => setIsChatOpen(false)} />
-            </motion.div>
-          </div>
-         )}
+        
+        {settings?.isChatEnabled && currentUser && (
+          isMobile ? (
+            <Sheet open={isChatOpen} onOpenChange={setIsChatOpen}>
+              <SheetContent side="bottom" className="h-[85vh] flex flex-col p-0">
+                {ChatComponent}
+              </SheetContent>
+            </Sheet>
+          ) : (
+            isChatOpen && (
+              <div
+                className="absolute top-20 right-10 z-50 pointer-events-none"
+                style={{
+                  width: '400px',
+                  height: '600px',
+                  transform: `translate(${chatPosition.x}px, ${chatPosition.y}px)`,
+                }}
+              >
+                <div className="h-full w-full pointer-events-auto">
+                    {ChatComponent}
+                </div>
+              </div>
+            )
+          )
+        )}
 
         {isAdmin && <AdminPanel isOpen={isAdminPanelOpen} onOpenChange={setIsAdminPanelOpen} onSettingsUpdate={handleSettingsUpdate} />}
         {currentUser && <ProfileDialog isOpen={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen} user={currentUser} onProfileUpdate={handleProfileUpdate} />}
@@ -310,8 +392,6 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
 
 
 export default function FamLocatorClient() {
-  // `Suspense` is key for `useSearchParams` to work correctly.
-  // We wrap the component that handles the auth flow in Suspense.
   return (
     <Suspense fallback={
        <div className="h-screen w-full flex flex-col items-center justify-center bg-background text-foreground">
@@ -325,5 +405,3 @@ export default function FamLocatorClient() {
     </Suspense>
   )
 }
-
-    

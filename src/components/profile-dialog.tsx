@@ -1,14 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,7 +24,7 @@ type ProfileDialogProps = {
   onOpenChange: (isOpen: boolean) => void;
   user: FamilyMember;
   onProfileUpdate: (updatedUser: FamilyMember) => void;
-  isAdminView?: boolean; // New prop to indicate if admin is viewing
+  isAdminView?: boolean;
 };
 
 export function ProfileDialog({ isOpen, onOpenChange, user, onProfileUpdate, isAdminView = false }: ProfileDialogProps) {
@@ -35,9 +34,9 @@ export function ProfileDialog({ isOpen, onOpenChange, user, onProfileUpdate, isA
   const [isChatEnabled, setIsChatEnabled] = useState(user.isChatEnabled ?? true);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Reset state if user prop changes
     setName(user.name);
     setAvatarUrl(user.avatar);
     setIsSharingLocation(user.isSharingLocation ?? true);
@@ -80,15 +79,23 @@ export function ProfileDialog({ isOpen, onOpenChange, user, onProfileUpdate, isA
   };
   
   const handleUploadClick = () => {
-      toast({
-          title: 'Próximamente',
-          description: 'La subida de archivos se implementará pronto. Por ahora, por favor usa una URL.',
-      });
-  }
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarUrl(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isAdminView ? `Perfil de ${user.name}` : 'Mi Perfil'}</DialogTitle>
         </DialogHeader>
@@ -101,6 +108,13 @@ export function ProfileDialog({ isOpen, onOpenChange, user, onProfileUpdate, isA
                     </AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col gap-2 w-full">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      className="hidden"
+                      accept="image/*"
+                    />
                     <Button variant="outline" onClick={handleUploadClick}>
                         <Upload className="mr-2 h-4 w-4" />
                         Subir Foto

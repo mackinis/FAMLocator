@@ -38,6 +38,12 @@ export type SiteSettings = {
   developerName?: string;
   developerUrl?: string;
   isChatEnabled?: boolean;
+  emailTemplates?: {
+    verification?: {
+      subject?: string;
+      body?: string;
+    }
+  }
 };
 
 export type LoginResult = {
@@ -48,3 +54,11 @@ export type LoginResult = {
     userId?: string;
     isAdmin?: boolean;
 }
+
+export type Chat = {
+  id: string;
+  name: string; // e.g., "General" or "John Doe"
+  memberIds: string[];
+  isGroup: boolean;
+  createdAt?: string;
+};

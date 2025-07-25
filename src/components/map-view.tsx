@@ -120,16 +120,18 @@ export default function MapView({ members, selectedMember, onSelectMember, curre
 
   const mapRef = useRef<google.maps.Map | null>(null);
 
-  const mapOptions = useMemo(() => {
+  const [mapOptions, setMapOptions] = useState({});
+
+  useEffect(() => {
     const currentHour = new Date().getHours();
     const isNightTime = currentHour < 6 || currentHour >= 18;
 
-    return {
+    setMapOptions({
         disableDefaultUI: true,
         zoomControl: false,
         gestureHandling: 'greedy' as const,
-        styles: isNightTime ? darkMapStyle : [], // Use dark styles at night, default (light) during day
-    }
+        styles: isNightTime ? darkMapStyle : [],
+    });
   }, []);
 
   const center = useMemo(() => {
@@ -225,7 +227,7 @@ export default function MapView({ members, selectedMember, onSelectMember, curre
       {currentUser && (
         <Button
           size="icon"
-          className="absolute bottom-10 right-4 z-10 rounded-full shadow-lg"
+          className="absolute bottom-4 right-4 md:bottom-10 md:right-4 z-20 rounded-full shadow-lg"
           onClick={handleCenterOnMe}
           title="Centrar en mi ubicación"
         >
