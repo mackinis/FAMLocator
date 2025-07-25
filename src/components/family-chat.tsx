@@ -29,9 +29,10 @@ type FamilyChatProps = {
   familyMembers: FamilyMember[];
   onDragStart?: (e: React.MouseEvent) => void;
   onChatsUpdate: (chats: Chat[]) => void;
+  onNewMessage: (chatId: string) => void;
 };
 
-function ChatContent({ chatId, currentUser }: { chatId: string, currentUser: FamilyMember }) {
+function ChatContent({ chatId, currentUser, onNewMessage, activeChatId }: { chatId: string, currentUser: FamilyMember, onNewMessage: (chatId: string) => void, activeChatId: string | null }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -44,11 +45,24 @@ function ChatContent({ chatId, currentUser }: { chatId: string, currentUser: Fam
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
         const msgs: Message[] = [];
+        let hasNewMessage = false;
         querySnapshot.forEach((doc) => {
-          msgs.push({ ...doc.data(), id: doc.id } as Message);
+          const message = { ...doc.data(), id: doc.id } as Message
+          msgs.push(message);
+          // Logic to detect new message
+          if(doc.metadata.hasPendingWrites === false && message.memberId !== currentUser.id){
+             const messageTime = (message.timestamp as Timestamp)?.toDate();
+             if(messageTime && (Date.now() - messageTime.getTime() < 5000)) { // 5 seconds threshold
+                hasNewMessage = true;
+             }
+          }
         });
         setMessages(msgs);
         setIsLoading(false);
+
+        if (hasNewMessage && activeChatId !== chatId) {
+            onNewMessage(chatId);
+        }
       },
       (error) => {
         console.error("Error fetching messages: ", error);
@@ -62,7 +76,7 @@ function ChatContent({ chatId, currentUser }: { chatId: string, currentUser: Fam
     );
 
     return () => unsubscribe();
-  }, [chatId, toast]);
+  }, [chatId, toast, currentUser.id, onNewMessage, activeChatId]);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -133,7 +147,7 @@ function ChatContent({ chatId, currentUser }: { chatId: string, currentUser: Fam
 }
 
 
-export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange, familyMembers, onDragStart, onChatsUpdate, onClose }: FamilyChatProps) {
+export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange, familyMembers, onDragStart, onChatsUpdate, onClose, onNewMessage }: FamilyChatProps) {
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const { toast } = useToast();
@@ -143,15 +157,9 @@ export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange,
 
   const privateChats = chats.filter(c => !c.isGroup);
   const generalChat = chats.find(c => c.isGroup) || null;
-  const [activeTab, setActiveTab] = useState<'general' | 'private'>('general');
-
-  useEffect(() => {
-    if (activeChat?.isGroup) {
-      setActiveTab('general');
-    } else {
-      setActiveTab('private');
-    }
-  }, [activeChat]);
+  
+  // This derived state determines which main tab ('general' or 'private') is active
+  const activeMainTab = activeChat?.isGroup ? 'general' : 'private';
 
   const getChatName = (chat: Chat) => {
     if (chat.isGroup) {
@@ -229,21 +237,21 @@ export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange,
                   onClick={() => onActiveChatChange(generalChat)}
                   className={cn(
                     "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1",
-                    activeTab === 'general' ? "bg-background text-foreground shadow-sm" : ""
+                    activeMainTab === 'general' ? "bg-background text-foreground shadow-sm" : ""
                   )}
                >
                   <Users className="mr-2 h-4 w-4" /> General
                </button>
                <button
                   onClick={() => {
-                      if (privateChats.length > 0) {
-                          onActiveChatChange(privateChats[0])
+                      if (privateChats.length > 0 && activeMainTab !== 'private') {
+                          onActiveChatChange(privateChats[0]);
                       }
                   }}
                   disabled={privateChats.length === 0}
                   className={cn(
                     "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 flex-1",
-                    activeTab === 'private' ? "bg-background text-foreground shadow-sm" : ""
+                    activeMainTab === 'private' ? "bg-background text-foreground shadow-sm" : ""
                   )}
                >
                    <User className="mr-2 h-4 w-4" /> Privados
@@ -256,7 +264,7 @@ export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange,
           </Button>
         </div>
 
-        {activeTab === 'private' && privateChats.length > 0 && (
+        {activeMainTab === 'private' && privateChats.length > 0 && (
           <ScrollArea className="w-full whitespace-nowrap">
             <div className="flex space-x-1 p-2 border-b items-start">
               {privateChats.map(chat => (
@@ -268,7 +276,7 @@ export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange,
                   <span
                     className={cn(
                       "text-xs font-medium",
-                      activeChat?.id === chat.id ? "text-foreground" : "text-muted-foreground"
+                      activeChat?.id === chat.id ? "text-foreground font-bold" : "text-muted-foreground"
                     )}
                   >
                     {getChatName(chat)}
@@ -322,7 +330,7 @@ export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange,
       </CardHeader>
       <CardContent className="flex-grow overflow-hidden p-4">
         {activeChat ? (
-            <ChatContent chatId={activeChat.id} currentUser={currentUser} />
+            <ChatContent chatId={activeChat.id} currentUser={currentUser} onNewMessage={onNewMessage} activeChatId={activeChat?.id} />
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center">
                 <div className="text-center text-muted-foreground">

@@ -1,4 +1,4 @@
-import type { FamilyMember } from '@/lib/types';
+import type { FamilyMember, Chat } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MapPin, MessageSquare } from 'lucide-react';
 import {
@@ -11,15 +11,32 @@ import {
 } from './ui/sidebar';
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
+import { useMemo } from 'react';
 
 type FamilyListProps = {
   onSelectMember: (member: FamilyMember) => void;
   selectedMember: FamilyMember | null;
   familyMembers: FamilyMember[];
   onStartChat: (member: FamilyMember) => void;
+  unreadChats: Set<string>;
+  chats: Chat[];
+  currentUserId: string;
 };
 
-export function FamilyList({ onSelectMember, selectedMember, familyMembers, onStartChat }: FamilyListProps) {
+export function FamilyList({ onSelectMember, selectedMember, familyMembers, onStartChat, unreadChats, chats, currentUserId }: FamilyListProps) {
+  
+  const unreadPrivateChatters = useMemo(() => {
+    const chatterIds = new Set<string>();
+    chats.forEach(chat => {
+      if (!chat.isGroup && unreadChats.has(chat.id)) {
+        const otherMemberId = chat.memberIds.find(id => id !== currentUserId);
+        if (otherMemberId) {
+          chatterIds.add(otherMemberId);
+        }
+      }
+    });
+    return chatterIds;
+  }, [unreadChats, chats, currentUserId]);
   
   return (
     <div className='flex flex-col h-full'>
@@ -61,11 +78,14 @@ export function FamilyList({ onSelectMember, selectedMember, familyMembers, onSt
                 <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="h-8 w-8 ml-1 shrink-0 group-data-[collapsible=icon]:hidden" 
+                    className="h-8 w-8 ml-1 shrink-0 group-data-[collapsible=icon]:hidden relative" 
                     onClick={() => onStartChat(member)}
                     title={`Chatear con ${member.name}`}
                 >
                     <MessageSquare className="h-4 w-4" />
+                     {unreadPrivateChatters.has(member.id) && (
+                        <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-green-500 ring-1 ring-card" />
+                    )}
                 </Button>
               </div>
             </SidebarMenuItem>

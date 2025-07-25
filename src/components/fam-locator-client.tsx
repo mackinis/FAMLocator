@@ -89,15 +89,18 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [chatPosition, setChatPosition] = useState({ x: 0, y: 0 });
-  const isDragging = useRef(false);
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const initialChatPos = useRef({ x: 0, y: 0 });
-
+  const [unreadChats, setUnreadChats] = useState<Set<string>>(new Set());
 
   const { toast } = useToast();
   const sidebarContext = useSidebar();
   const isSidebarOpen = sidebarContext?.state === 'expanded';
   const isMobile = useIsMobile();
+  
+  // Refs for dragging chat window - MUST be declared unconditionally
+  const isDragging = useRef(false);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const initialChatPos = useRef({ x: 0, y: 0 });
+
 
   const currentUser = useMemo(() => {
     return familyMembers.find(m => m.id === loggedInUserId) || null;
@@ -213,6 +216,18 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
   const handleSelectMember = (member: FamilyMember) => {
     setSelectedMember(member);
   };
+  
+  const handleActiveChatChange = (chat: Chat | null) => {
+    setActiveChat(chat);
+    if (chat) {
+        // Mark chat as read
+        setUnreadChats(prev => {
+            const newUnread = new Set(prev);
+            newUnread.delete(chat.id);
+            return newUnread;
+        });
+    }
+  };
 
   const handleStartChat = async (otherMember: FamilyMember) => {
     if (!currentUser || currentUser.id === otherMember.id) return;
@@ -220,12 +235,12 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
       const chatId = await getOrCreateChat(currentUser.id, otherMember.id);
       const existingChat = chats.find(c => c.id === chatId);
       if (existingChat) {
-        setActiveChat(existingChat);
+        handleActiveChatChange(existingChat);
       } else {
         const newChats = await getChatsForUser(currentUser.id);
         setChats(newChats);
         const newActiveChat = newChats.find(c => c.id === chatId);
-        setActiveChat(newActiveChat || null);
+        handleActiveChatChange(newActiveChat || null);
       }
       setIsChatOpen(true);
 
@@ -250,6 +265,7 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
     setSettings(updatedSettings);
   }
 
+  // Drag handlers - MUST be declared unconditionally
   const onDragStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return; // Only allow left-click drags
     isDragging.current = true;
@@ -275,6 +291,12 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
     document.removeEventListener('mouseup', onDragEnd);
   };
 
+  const unreadPrivateChats = useMemo(() => {
+    const privateChatIds = new Set(
+        chats.filter(c => !c.isGroup).map(c => c.id)
+    );
+    return new Set([...unreadChats].filter(id => privateChatIds.has(id)));
+  }, [unreadChats, chats]);
 
   if (isLoading) {
     return (
@@ -299,13 +321,20 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
       currentUser={currentUser}
       chats={chats}
       activeChat={activeChat}
-      onActiveChatChange={setActiveChat}
+      onActiveChatChange={handleActiveChatChange}
       onClose={() => setIsChatOpen(false)}
       familyMembers={familyMembers}
       onDragStart={onDragStart}
       onChatsUpdate={setChats}
+      onNewMessage={(chatId) => {
+          if (activeChat?.id !== chatId) {
+             setUnreadChats(prev => new Set(prev).add(chatId))
+          }
+        }
+      }
     />
   );
+  
 
   return (
       <div className="h-screen w-full bg-background text-foreground font-body overflow-hidden">
@@ -317,8 +346,11 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
           </div>
           <div className="flex items-center gap-1 md:gap-2">
             {settings?.isChatEnabled && (
-                 <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(prev => !prev)} disabled={!currentUser}>
+                 <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(prev => !prev)} disabled={!currentUser} className="relative">
                     <MessageSquare className="h-5 w-5" />
+                    {unreadPrivateChats.size > 0 && (
+                        <span className="absolute top-1 right-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-card" />
+                    )}
                 </Button>
             )}
             {isAdmin && 
@@ -344,7 +376,7 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
         
         <main className="h-full flex flex-row pt-16">
             <Sidebar collapsible="icon">
-              <FamilyList onSelectMember={handleSelectMember} selectedMember={selectedMember} familyMembers={visibleFamilyMembers.filter(m => m.id !== currentUser.id)} onStartChat={handleStartChat} />
+              <FamilyList onSelectMember={handleSelectMember} selectedMember={selectedMember} familyMembers={visibleFamilyMembers.filter(m => m.id !== currentUser.id)} onStartChat={handleStartChat} unreadChats={unreadChats} chats={chats} currentUserId={currentUser.id} />
             </Sidebar>
             <div className="flex-1 flex flex-col relative h-full">
               <div className="flex-1 w-full relative">
