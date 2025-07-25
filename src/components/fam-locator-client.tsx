@@ -291,12 +291,9 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
     document.removeEventListener('mouseup', onDragEnd);
   };
 
-  const unreadPrivateChats = useMemo(() => {
-    const privateChatIds = new Set(
-        chats.filter(c => !c.isGroup).map(c => c.id)
-    );
-    return new Set([...unreadChats].filter(id => privateChatIds.has(id)));
-  }, [unreadChats, chats]);
+  const hasUnreadMessages = useMemo(() => {
+    return unreadChats.size > 0;
+  }, [unreadChats]);
 
   if (isLoading) {
     return (
@@ -327,7 +324,7 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
       onDragStart={onDragStart}
       onChatsUpdate={setChats}
       onNewMessage={(chatId) => {
-          if (activeChat?.id !== chatId) {
+          if (!isChatOpen || activeChat?.id !== chatId) {
              setUnreadChats(prev => new Set(prev).add(chatId))
           }
         }
@@ -348,7 +345,7 @@ function FamLocatorContent({ loggedInUserId, isAdmin }: FamLocatorContentProps) 
             {settings?.isChatEnabled && (
                  <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(prev => !prev)} disabled={!currentUser} className="relative">
                     <MessageSquare className="h-5 w-5" />
-                    {unreadPrivateChats.size > 0 && (
+                    {hasUnreadMessages && (
                         <span className="absolute top-1 right-1 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-card" />
                     )}
                 </Button>

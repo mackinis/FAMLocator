@@ -12,6 +12,7 @@ import {
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
 import { useMemo } from 'react';
+import { cn } from '@/lib/utils';
 
 type FamilyListProps = {
   onSelectMember: (member: FamilyMember) => void;

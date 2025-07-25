@@ -32,37 +32,41 @@ type FamilyChatProps = {
   onNewMessage: (chatId: string) => void;
 };
 
-function ChatContent({ chatId, currentUser, onNewMessage, activeChatId }: { chatId: string, currentUser: FamilyMember, onNewMessage: (chatId: string) => void, activeChatId: string | null }) {
+function ChatContent({ chatId, currentUser, onNewMessage }: { chatId: string, currentUser: FamilyMember, onNewMessage: (chatId: string) => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
     setIsLoading(true);
+    isInitialLoad.current = true;
     const db = getDb();
     const q = query(collection(db, 'chats', chatId, 'messages'), orderBy("timestamp", "asc"));
+    
     const unsubscribe = onSnapshot(q, 
       (querySnapshot) => {
         const msgs: Message[] = [];
-        let hasNewMessage = false;
+        
+        querySnapshot.docChanges().forEach((change) => {
+            if (change.type === "added") {
+                const message = { ...change.doc.data(), id: change.doc.id } as Message;
+                if (!isInitialLoad.current && message.memberId !== currentUser.id) {
+                    onNewMessage(chatId);
+                }
+            }
+        });
+
         querySnapshot.forEach((doc) => {
           const message = { ...doc.data(), id: doc.id } as Message
           msgs.push(message);
-          // Logic to detect new message
-          if(doc.metadata.hasPendingWrites === false && message.memberId !== currentUser.id){
-             const messageTime = (message.timestamp as Timestamp)?.toDate();
-             if(messageTime && (Date.now() - messageTime.getTime() < 5000)) { // 5 seconds threshold
-                hasNewMessage = true;
-             }
-          }
         });
+
         setMessages(msgs);
         setIsLoading(false);
-
-        if (hasNewMessage && activeChatId !== chatId) {
-            onNewMessage(chatId);
-        }
+        
+        isInitialLoad.current = false;
       },
       (error) => {
         console.error("Error fetching messages: ", error);
@@ -76,7 +80,7 @@ function ChatContent({ chatId, currentUser, onNewMessage, activeChatId }: { chat
     );
 
     return () => unsubscribe();
-  }, [chatId, toast, currentUser.id, onNewMessage, activeChatId]);
+  }, [chatId, toast, currentUser.id, onNewMessage]);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -126,9 +130,9 @@ function ChatContent({ chatId, currentUser, onNewMessage, activeChatId }: { chat
                       : 'bg-secondary text-secondary-foreground'
                   }`}
                 >
-                  <p className="text-[10px]">{message.text}</p>
+                  <p className="text-sm">{message.text}</p>
                 </div>
-                <span className="text-[9px] text-muted-foreground mt-1">
+                <span className="text-xs text-muted-foreground mt-1">
                   {isCurrentUser ? "Tú" : message.memberName}, {formatTimestamp(message.timestamp)}
                 </span>
               </div>
@@ -330,7 +334,7 @@ export function FamilyChat({ currentUser, chats, activeChat, onActiveChatChange,
       </CardHeader>
       <CardContent className="flex-grow overflow-hidden p-4">
         {activeChat ? (
-            <ChatContent chatId={activeChat.id} currentUser={currentUser} onNewMessage={onNewMessage} activeChatId={activeChat?.id} />
+            <ChatContent chatId={activeChat.id} currentUser={currentUser} onNewMessage={onNewMessage} />
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center">
                 <div className="text-center text-muted-foreground">
